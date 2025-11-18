@@ -3,6 +3,7 @@ import importlib
 import Constants
 importlib.reload(Constants)
 import geopandas as gpd
+import shapely
 from shapely.geometry import Polygon
 import Utils
 
@@ -51,6 +52,17 @@ gdf_box_plots_2_3_1A_1B = Utils.draw_grid_box(
     #col1=5, row1=0,
 
 )
+
+gdf_box_milpa1    = Utils.draw_grid_box( # was gdf_box
+    Constants.lat0-.0006,
+    Constants.lon0-.0011,
+    Constants.dx,Constants.dy,
+    Constants.n_cols,Constants.n_rows,
+    Constants.rotation_deg,
+    col1=8+3, row1=0,
+    col2=13+7 , row2=8,
+)
+
 print ("Constants.n_cols = ", Constants.n_cols)
 print ("Constants.n_rows = ", Constants.n_rows)
 
@@ -130,7 +142,6 @@ gdf_box_jilotepec_rural =  Utils.draw_grid_box(
 
 
 
-# Your coordinates (longitude, latitude pairs)
 
 coordsMilpa1 = [
     (-96.870102, 19.777411),
@@ -138,6 +149,17 @@ coordsMilpa1 = [
     (-96.871361, 19.776827),
     (-96.871643, 19.776731),
     (-96.871582, 19.777145),
+    (-96.871429, 19.777185),
+    (-96.871193, 19.777403),
+    (-96.870384, 19.777546),
+    (-96.870102, 19.777411)  # Close the polygon
+]
+coordsMilpa1SinHormiguero = [
+    (-96.870102, 19.777411),
+    (-96.870583, 19.777035),
+    (-96.871361, 19.776827),
+    #(-96.871643, 19.776731),
+    #(-96.871582, 19.777145),
     (-96.871429, 19.777185),
     (-96.871193, 19.777403),
     (-96.870384, 19.777546),
@@ -177,7 +199,11 @@ coords14QKG = [
 
 # Create the polygon
 polygonMilpa1 = Polygon(coordsMilpa1)
+#gdf_plotMilpa1 = gpd.GeoDataFrame(geometry=[shapely.union(polygonMilpa1,polygonMilpa2)], crs="EPSG:4326")
 gdf_plotMilpa1 = gpd.GeoDataFrame(geometry=[polygonMilpa1], crs="EPSG:4326")
+
+polygonMilpa1SinHormiguero = Polygon(coordsMilpa1SinHormiguero)
+gdf_plotMilpa1SinHormiguero = gpd.GeoDataFrame(geometry=[polygonMilpa1SinHormiguero], crs="EPSG:4326")
 
 polygonMilpa2= Polygon(coordsMilpa2)
 gdf_plotMilpa2 = gpd.GeoDataFrame(geometry=[polygonMilpa2], crs="EPSG:4326")

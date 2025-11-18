@@ -1,4 +1,4 @@
-
+import pandas as pd
 from rasterio.transform import from_bounds
 
 
@@ -20,6 +20,16 @@ tile_width, tile_height = 10980, 10980  # 10m resolution
 #transform_override = from_bounds(*bounds_wgs84, tile_width, tile_height)
 crs_override = "EPSG:4326"
 
+# This will be used to define the season of interest for earlier years as well.
+#reference:
+#Alonso-Dı´az MA, Castillo-Gallegos E, Basurto-Camberos H,Jarillo-Rodrı´guez J, Valles-de la Mora B (2007) Respuesta
+#productiva de una pastura de gramas nativas bajo pastoreo rotacional intensivo en clima ca´lido hu´medo. Avances en Investigacio´n Agropecuaria 11:35–55
+
+warmDryStart2025 = pd.to_datetime("2025-03-01")
+warmDryEnd2025   = pd.to_datetime("2025-06-30") 
+# This will cause all stat significance to disappear:
+#warmDryStart2025 = pd.to_datetime("2025-01-01")
+#warmDryEnd2025   = pd.to_datetime("2025-07-30") 
 
 # Dates you want to sample NDMI from (you can extend this list)
 dates = [

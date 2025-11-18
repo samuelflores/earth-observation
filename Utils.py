@@ -1,6 +1,7 @@
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm, Normalize
 import geopandas as gpd
 import pandas as pd
+import scipy
 
 import openmeteo_requests
 import requests_cache
@@ -1348,6 +1349,40 @@ def daily_temp_openmeteo(lat, lon, start, end):
 # Example use (same as with precipitation):
 #temp_df = daily_temp_openmeteo(Constants.lat0, Constants.lon0, startDate, endDate)
 
+import urllib.request
+import json
+
+# Define the function to fetch weather data
+def fetch_weather_data(api_key, location, start_date, end_date, unit_group):
+    base_url = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/"
+    url = f"{base_url}{location}/{start_date}/{end_date}?unitGroup={unit_group}&contentType=json&include=days&key={api_key}"
+    save_file_name = "visualcrossing."+location+start_date+end_date+unit_group+".json"
+    weather_data = {}
+    if os.path.exists(save_file_name):
+        print(f"Cell [Line {inspect.currentframe().f_lineno}] ... Loading data from  ",save_file_name," ...")
+        with open(save_file_name, 'r') as file:
+            weather_data = json.load(file)
+        #weather_data = pd.read_csv(save_file_name)
+        #return pd.DataFrame(weather_data)
+        return weather_data
+    else:
+        try:
+            response = urllib.request.urlopen(url)
+            data = response.read()
+            weather_data = json.loads(data)
+            #weather_data.to_csv(save_file_name, index=False) 
+            with open(save_file_name, 'w') as f:
+                json.dump(weather_data, f)
+            return weather_data
+            #return pd.DataFrame(weather_data)
+        except urllib.error.URLError as e:
+            if hasattr(e, 'reason'):
+                print('Failed to reach a server. Reason: ', e.reason)
+            elif hasattr(e, 'code'):
+                print('The server couldn\'t fulfill the request. Error code: ', e.code)
+            return None
+
+
 
 
 def crop_and_sum_intensity(band_path, aoi_gdf, scale_factor=None, clip_to_aoi_bounds=True):
@@ -1411,3 +1446,25 @@ def get_stats_from_gdf (my_gdf_box, input_tif, my_name, date, my_cloudy):
     else: 
         print(f"[Line {inspect.currentframe().f_lineno}] ... Too cloudy. Returning NaN. ")
         return empty_stats
+
+
+def compute_season_stat_significance(my_start_date,my_end_date,my_df,plotName1,plotName2):
+    plot1_avg = my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date), plotName1].mean()
+    plot2_avg = my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date), plotName2].mean()
+    #for 
+    plot1_std_dev = my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date), plotName1].std()
+    plot2_std_dev = my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date), plotName2].std()
+    # Std dev of the sum:
+    print("std dev for ",plotName1 ," = ",   plot1_std_dev)
+    print("std dev for ",plotName2 ," = ",   plot2_std_dev)
+    sum_std_dev = np.sqrt(plot1_std_dev * plot1_std_dev + plot2_std_dev * plot2_std_dev)
+    print("std dev for difference  = ",  sum_std_dev )
+    difference = np.absolute(plot2_avg- plot1_avg)
+    print("difference = ",difference)
+    zscore = difference/sum_std_dev
+    print ("For plots : ",plotName1, ", ",plotName2)
+    print("Z = ",zscore)
+    p_values = scipy.stats.norm.sf(abs(zscore)) #one-sided
+    print ("p value = ", p_values)
+    return p_values
+
