@@ -52,8 +52,8 @@ lon0 = -96.86942
 #lat0=26.0734
 #lon0= -97.2086
 # Borana University, Ethiopia. 1st October 2021 to the 30th of June 2022.
-#lat0=4.908058823095451
-#lon0= 38.15135412942004
+lat0=4.908058823095451
+lon0= 38.15135412942004
 
 # These were the lime tree locations:
 n_cols=21

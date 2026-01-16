@@ -121,7 +121,7 @@ def latlon_to_s2_tile(lat, lon):
     match = S2_GRID[S2_GRID.contains(pt)]
     if match.empty:
         raise ValueError(f"No Sentinel-2 tile found for {lat},{lon}")
-    print(f"[Line {inspect.currentframe().f_lineno}] ... found mgrs_tile = ",match.iloc[0]["Name"])
+    print(f"[Line {inspect.currentframe().f_lineno}] ... Mapped latitude ", lat,", longitude ",lon," to mgrs_tile = ",match.iloc[0]["Name"])
     return match.iloc[0]["Name"]  # field is "Name" e.g. "14QQG"
 
 def make_path_name(cache_dir, mgrs_tile,date,band,extension):
@@ -513,11 +513,11 @@ def draw_grid_box(lat0, lon0, dx, dy, n_cols, n_rows, rotation_deg,
     x2, y2 = grid_to_xy(col2, row1, x0, y0, dx, dy, rotation_deg)
     x3, y3 = grid_to_xy(col2, row2, x0, y0, dx, dy, rotation_deg)
     x4, y4 = grid_to_xy(col1, row2, x0, y0, dx, dy, rotation_deg)
-    print ("x1,y1 etc")
-    print (x1,y1)
-    print (x2,y2)
-    print (x3,y3)
-    print (x4,y4)
+    #print ("x1,y1 etc")
+    #print (x1,y1)
+    #print (x2,y2)
+    #print (x3,y3)
+    #print (x4,y4)
 
     poly = Polygon([(x1, y1), (x2, y2), (x3, y3), (x4, y4), (x1, y1)])
 
@@ -1441,30 +1441,89 @@ def get_stats_from_gdf (my_gdf_box, input_tif, my_name, date, my_cloudy):
     print(f"Cell [Line {inspect.currentframe().f_lineno}] ... done working with ",my_tif)
     if not my_cloudy: 
         print("Avg NDMI over AOI ", my_name," = ",return_stats.get("mean", np.nan) )
+        #print("Area = ",my_gdf_box.area)
         return_stats = crop_ndmi_to_gdf(input_tif, my_gdf_box, my_tif)  
         return return_stats
     else: 
         print(f"[Line {inspect.currentframe().f_lineno}] ... Too cloudy. Returning NaN. ")
         return empty_stats
 
-
 def compute_season_stat_significance(my_start_date,my_end_date,my_df,plotName1,plotName2):
+    # AVG
     plot1_avg = my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date), plotName1].mean()
     plot2_avg = my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date), plotName2].mean()
-    #for 
+    # STD DEV
     plot1_std_dev = my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date), plotName1].std()
     plot2_std_dev = my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date), plotName2].std()
+    print("****************************")
+    print ("For quantities : ",plotName1, ", ",plotName2, " report of difference between ", my_start_date," and ",my_end_date)
     # Std dev of the sum:
     print("std dev for ",plotName1 ," = ",   plot1_std_dev)
     print("std dev for ",plotName2 ," = ",   plot2_std_dev)
     sum_std_dev = np.sqrt(plot1_std_dev * plot1_std_dev + plot2_std_dev * plot2_std_dev)
-    print("std dev for difference  = ",  sum_std_dev )
     difference = np.absolute(plot2_avg- plot1_avg)
-    print("difference = ",difference)
+    print("Mean value of ",plotName1 ," over date range = ", plot1_avg)
+    print("Mean value of ",plotName2 ," over date range = ", plot2_avg)
+    print("difference between ",plotName1," and ",plotName2," = ",difference)
+    print("std dev for difference  = ",  sum_std_dev )
     zscore = difference/sum_std_dev
-    print ("For plots : ",plotName1, ", ",plotName2)
     print("Z = ",zscore)
     p_values = scipy.stats.norm.sf(abs(zscore)) #one-sided
     print ("p value = ", p_values)
+    print("****************************")
+    return p_values
+
+# my_df should be a dataframe that contains columns: date, cloudy, red_green_blue_average 
+# as well as plot-specific measurements including: gndvi_plots_4_5, gndvi_milpa1, ndmi_plots_4_5, ndmi_milpa1, etc.
+# This compares the quantity indicated in plotName during the season season_start_month_day to season_end_month_day,
+# for comparison_year, vs. the range baseline_start_year, baseline_end_year.
+# season_start_month, season_start_day, etc. should be int's.
+
+def compute_current_vs_past_seasons_single_plot_stat_significance(baseline_start_year, baseline_end_year, comparison_year, season_start_month, season_start_day, season_end_month, season_end_day, my_df, plotName):
+    # AVG
+    plot_baseline_avg = 0
+    plot_baseline_std_dev = 0
+    myYear = baseline_start_year
+    my_start_date = pd.to_datetime("2011-11-11")
+    my_end_date = pd.to_datetime("2011-11-11")
+    my_end_date = pd.to_datetime("2011-11-11")
+    plot_baseline_df = my_df
+    plot_baseline_df = plot_baseline_df.iloc[:0]  # initialize 
+    while (myYear <= baseline_end_year) :
+        my_start_date = pd.to_datetime(str(myYear)+"-"+str(season_start_month)+"-"+str(season_start_day))
+        my_end_date = pd.to_datetime(str(myYear)+"-"+str(season_end_month)+"-"+str(season_end_day))
+        #print ("Appending season from ",my_start_date," to ",my_end_date)
+        plot_baseline_df = pd.concat([ plot_baseline_df ,  my_df.loc[(my_df["date"] >= my_start_date) & (my_df["date"] <= my_end_date),: ] ])
+        #print("New length of plot_baseline_df = ", len(plot_baseline_df))
+        #print("New mean() for plot_baseline_df = ", (plot_baseline_df.loc[:,plotName]).mean())
+        #print("New  std() for plot_baseline_df = ", (plot_baseline_df.loc[:,plotName]).std())
+        myYear +=1
+    plot_baseline_avg = (plot_baseline_df.loc[:,plotName]).mean()
+    plot_baseline_std = (plot_baseline_df.loc[:,plotName]).std()
+    #print("std dev for ",baseline_start_year," to " ,baseline_end_year, " = ", plot_baseline_std )
+    #print("ave for "    ,baseline_start_year," to " ,baseline_end_year, " = ", plot_baseline_avg )
+
+    comparison_start_date = pd.to_datetime(str(comparison_year)+"-"+str(season_start_month)+"-"+str(season_start_day)  )
+    comparison_end_date = pd.to_datetime(str(comparison_year)+"-"+str(season_end_month)+"-"+str(season_end_day)  )
+
+    comparison_avg = my_df.loc[(my_df["date"] >= comparison_start_date) & (my_df["date"] <= comparison_end_date), plotName].mean()
+    comparison_std = my_df.loc[(my_df["date"] >= comparison_start_date) & (my_df["date"] <= comparison_end_date), plotName].std()
+
+    # Send report to stdout:
+    print("****************************")
+    print("Comparison of ",plotName," for the range of years ",baseline_start_year, " to ", baseline_end_year, " vs.  year ",comparison_year)
+    print("std dev for ",comparison_year ," = ", comparison_std )
+    print("ave for      ",comparison_year ," = ", comparison_avg )
+
+    sum_std_dev = np.sqrt(comparison_std * comparison_std + plot_baseline_std * plot_baseline_std)
+    #print("comparing ",comparison_year, " vs. ",baseline_start_year," to " ,baseline_end_year," for quantity ",plotName)
+    print("std dev for difference  = ",  sum_std_dev )
+    difference = np.absolute(comparison_avg - plot_baseline_avg)
+    print("difference = ",difference)
+    zscore = difference/sum_std_dev
+    print("Z = ",zscore)
+    p_values = scipy.stats.norm.sf(abs(zscore)) #one-sided
+    print ("p value = ", p_values)
+    print("****************************")
     return p_values
 
