@@ -191,28 +191,6 @@ def generate_date_range_old(start: str, end: str, fmt: str = "%Y-%m-%d", dateSte
     
 
 
-# Deprecated. Tile is hard coded rather than dynamically computed from lat, lon. Also, does not cache downloaded data. Use download_band_dynamic instead
-"""
-def download_band(date, band):
-    y, m, d = date.split("-")
-
-    #base_url = f"https://roda.sentinel-hub.com/tiles/{Constants.tile['utm_zone']}/{Constants.tile['latitude_band']}/{Constants.tile['grid_square']}/{y}/{int(m)}/{int(d)}/0/{band}.jp2"
-    base_url = f"https://roda.sentinel-hub.com/sentinel-s2-l1c/tiles/{Constants.tile['utm_zone']}/{Constants.tile['latitude_band']}/{Constants.tile['grid_square']}/{y}/{int(m)}/{int(d)}/0/{band}.jp2"
-    #base_url = f"https://sentinel-s2-l1c.s3.amazonaws.com/tiles/{tile['utm_zone']}/{tile['latitude_band']}/{tile['grid_square']}/{y}/{int(m)}/{int(d)}/0/{band}.jp2"
-
-    print("base_url = ",base_url )
-    filename = f"s2_point_series/{date}_{band}.jp2"
-    if not os.path.exists(filename):
-        r = requests.get(base_url, stream=True)
-        if r.status_code == 200:
-            with open(filename, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        else:
-            return None
-    return filename if os.path.exists(filename) else None
-
-"""
 
 
 # New method using Sentinel 2 tiling grid shapefile:
@@ -232,133 +210,6 @@ def make_path_name(cache_dir, mgrs_tile,date,band,extension):
     print("extension = >",extension,"<")
     return os.path.join(cache_dir, f"{mgrs_tile}_{date}_{band}.{extension}")
 
-
-
-# You already have this:
-# from your_utils import latlon_to_s2_tile
-
-def download_band_dynamic_old(date: str, band: str, lat: float, lon: float,
-                          cache_dir: str = "s2_point_series",
-                          level: Optional[str] = None) -> Optional[str]:
-    """
-    Download a Sentinel-2 asset for a given date/tile:
-      - L1C bands (default): .../0/B11.jp2
-      - L1C QA60:            .../0/QA60.jp2
-      - L2A SCL (auto):      .../R20m/SCL_20m.jp2
-      - L2A bands (if level='L2A'): .../R10m/B04_10m.jp2, .../R20m/B11_20m.jp2
-
-    Args:
-        date: 'YYYY-MM-DD'
-        band: e.g. 'B08', 'B11', 'QA60', 'SCL' (or 'SCL_20m')
-        lat, lon: point inside desired tile
-        cache_dir: where to save
-        level: 'L1C', 'L2A', or None to auto (SCL→L2A, QA60→L1C, others→L1C)
-
-    Returns:
-        Local filename, or None on failure.
-    """
-    # Parse date
-    y, m, d = (int(x) for x in date.split("-"))
-
-    # Tile lookup (e.g., '14QQG')
-    mgrs_tile = latlon_to_s2_tile(lat, lon)
-    utm_zone  = mgrs_tile[0:2]
-    lat_band  = mgrs_tile[2]
-    grid_sq   = mgrs_tile[3:5]
-
-    band_u = band.upper()
-
-    # Decide product level if not set
-    if level is None:
-        if band_u.startswith("SCL"):
-            level = "L2A"
-        elif band_u == "QA60":
-            level = "L1C"
-        else:
-            level = "L1C"  # keep your original default
-    level = level.upper()
-
-    # Build URL path according to level/band
-    urls_to_try = []
-    if level == "L1C":
-        bucket = "https://sentinel-s2-l1c.s3.amazonaws.com/tiles"
-        # filenames are like B08.jp2, B11.jp2, QA60.jp2
-        fname = f"{band_u}.jp2"
-        for seq in (0, 1):
-            url = f"{bucket}/{utm_zone}/{lat_band}/{grid_sq}/{y}/{m}/{d}/{seq}/{fname}"
-            urls_to_try.append(url)
-
-        band_tag = band_u  # for local filename
-
-    elif level == "L2A":
-        bucket = "https://sentinel-s2-l2a.s3.amazonaws.com/tiles"
-        # resolution subfolder + filename differ by band
-        print(f"[Line {inspect.currentframe().f_lineno}] ...       ")
-        if band_u.startswith("SCL"):
-            print(f"[Line {inspect.currentframe().f_lineno}] ...       ")
-            sub = "R20m"
-            fname = "SCL_20m.jp2"
-            band_tag = "SCL_20m"
-        else:
-            # map band -> native resolution (10m/20m)
-            res_map = {
-                "B02":"10m","B03":"10m","B04":"10m","B08":"10m",
-                "B05":"20m","B06":"20m","B07":"20m","B8A":"20m",
-                "B11":"20m","B12":"20m"
-            }
-            if band_u not in res_map:
-                raise ValueError(f"Unsupported L2A band: {band_u}")
-            res = res_map[band_u]
-            sub = f"R{res}"
-            fname = f"{band_u}_{res}.jp2"
-            band_tag = f"{band_u}_{res}"
-
-        for seq in (0, 1):
-            url = f"{bucket}/{utm_zone}/{lat_band}/{grid_sq}/{y}/{m}/{d}/{seq}/{sub}/{fname}"
-            urls_to_try.append(url)
-    else:
-        raise ValueError(f"level must be 'L1C', 'L2A', or None; got {level!r}")
-
-    # Local cache filename
-    os.makedirs(cache_dir, exist_ok=True)
-    filename = os.path.join(cache_dir, f"{mgrs_tile}_{date}_{band_tag}.jp2")
-
-    if os.path.exists(filename):
-        return filename
-
-    # Try URLs (sequence 0 then 1)
-    for url in urls_to_try:
-        print (" trying url : ",url)
-        r = requests.get(url, stream=True)
-        if r.status_code == 200:
-            with open(filename, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            return filename
-    if level == "L2A" and band_u.startswith("SCL"):
-        print(f"[Line {inspect.currentframe().f_lineno}] ...       ")
-        token = os.getenv("ACCESS_TOKEN") or os.getenv("CDSE_ACCESS_TOKEN")
-        if token:
-            ok = _download_scl_from_cdse(date, mgrs_tile, filename, token, scl_res="R20m")
-            print(f"[Line {inspect.currentframe().f_lineno}] ...  date  =  ",date    )
-            print(f"[Line {inspect.currentframe().f_lineno}] ...mgrs_tile  ",mgrs_tile)
-            print(f"[Line {inspect.currentframe().f_lineno}] ...filename=  ",filename)
-            print(f"[Line {inspect.currentframe().f_lineno}] ...token   =  ",token   )
-            print(f"[Line {inspect.currentframe().f_lineno}] ...     ok =  ",ok)
-            if ok:
-                print(f"[Line {inspect.currentframe().f_lineno}] ...       ")
-                return filename
-        else :
-            print(f"[Line {inspect.currentframe().f_lineno}] ...       ")
-    # If we get here, all attempts failed
-    print(f"[Line {inspect.currentframe().f_lineno}] ...       ")
-    print(f"Failed to download {band_tag} on {date} for tile {mgrs_tile}. "
-          f"Tried: {urls_to_try[0]} (and sequence fallback).")
-    return None
-
-
-
-
 def download_band_dynamic(
     date: str,
     band: str,
@@ -367,15 +218,166 @@ def download_band_dynamic(
     cache_dir: str = "s2_point_series",
     level=None
 ):
+    """
+    Download a Sentinel-2 asset for a given date and tile.
 
-    # ... KEEP YOUR EXISTING CODE ABOVE HERE ...
-    # everything that calculates mgrs_tile, urls_to_try,
-    # band_tag, filename, etc.
+    Default behavior:
+      - ordinary spectral bands -> L1C
+      - QA60 -> L1C
+      - SCL / SCL_20m -> L2A
 
+    Parameters
+    ----------
+    date : str
+        Acquisition date in YYYY-MM-DD format.
+    band : str
+        Band name, e.g. B02, B03, B04, B08, B11, QA60, SCL.
+    lat, lon : float
+        Coordinates of a point inside the desired Sentinel-2 tile.
+    cache_dir : str
+        Directory in which downloaded JP2 files are cached.
+    level : str or None
+        "L1C", "L2A", or None for automatic selection.
+
+    Returns
+    -------
+    str or None
+        Local filename on success, otherwise None.
+    """
+
+    # --------------------------------------------------------
+    # Parse date and determine Sentinel-2 tile
+    # --------------------------------------------------------
+
+    y, m, d = (int(x) for x in date.split("-"))
+
+    mgrs_tile = latlon_to_s2_tile(lat, lon)
+
+    utm_zone = mgrs_tile[0:2]
+    lat_band = mgrs_tile[2]
+    grid_sq = mgrs_tile[3:5]
+
+    band_u = band.upper()
+
+    # --------------------------------------------------------
+    # Select product level
+    # --------------------------------------------------------
+
+    if level is None:
+        if band_u.startswith("SCL"):
+            level = "L2A"
+        elif band_u == "QA60":
+            level = "L1C"
+        else:
+            # Preserve the original behavior used by the
+            # existing NDMI-processing workflow.
+            level = "L1C"
+
+    level = level.upper()
+
+    # --------------------------------------------------------
+    # Construct possible download URLs
+    # --------------------------------------------------------
+
+    urls_to_try = []
+
+    if level == "L1C":
+
+        bucket = "https://sentinel-s2-l1c.s3.amazonaws.com/tiles"
+
+        # L1C filenames:
+        # B02.jp2, B03.jp2, B04.jp2, B08.jp2, B11.jp2, QA60.jp2, etc.
+        fname = f"{band_u}.jp2"
+
+        for seq in (0, 1):
+            url = (
+                f"{bucket}/"
+                f"{utm_zone}/{lat_band}/{grid_sq}/"
+                f"{y}/{m}/{d}/{seq}/"
+                f"{fname}"
+            )
+
+            urls_to_try.append(url)
+
+        band_tag = band_u
+
+    elif level == "L2A":
+
+        bucket = "https://sentinel-s2-l2a.s3.amazonaws.com/tiles"
+
+        if band_u.startswith("SCL"):
+
+            sub = "R20m"
+            fname = "SCL_20m.jp2"
+            band_tag = "SCL_20m"
+
+        else:
+
+            # Native L2A resolution for the bands we use.
+            res_map = {
+                "B02": "10m",
+                "B03": "10m",
+                "B04": "10m",
+                "B08": "10m",
+                "B05": "20m",
+                "B06": "20m",
+                "B07": "20m",
+                "B8A": "20m",
+                "B11": "20m",
+                "B12": "20m",
+            }
+
+            if band_u not in res_map:
+                raise ValueError(
+                    f"Unsupported L2A band: {band_u}"
+                )
+
+            res = res_map[band_u]
+
+            sub = f"R{res}"
+            fname = f"{band_u}_{res}.jp2"
+            band_tag = f"{band_u}_{res}"
+
+        for seq in (0, 1):
+
+            url = (
+                f"{bucket}/"
+                f"{utm_zone}/{lat_band}/{grid_sq}/"
+                f"{y}/{m}/{d}/{seq}/"
+                f"{sub}/{fname}"
+            )
+
+            urls_to_try.append(url)
+
+    else:
+
+        raise ValueError(
+            f"level must be 'L1C', 'L2A', or None; "
+            f"got {level!r}"
+        )
+
+    # --------------------------------------------------------
+    # Local cache filename
+    # --------------------------------------------------------
+
+    os.makedirs(cache_dir, exist_ok=True)
+
+    filename = os.path.join(
+        cache_dir,
+        f"{mgrs_tile}_{date}_{band_tag}.jp2"
+    )
+
+    # Already downloaded
     if os.path.exists(filename):
         return filename
 
+    # Download into .part first so an interrupted download
+    # cannot masquerade as a valid JP2.
     tmp_filename = filename + ".part"
+
+    # --------------------------------------------------------
+    # Try each Sentinel-2 sequence number
+    # --------------------------------------------------------
 
     for url in urls_to_try:
 
@@ -392,7 +394,7 @@ def download_band_dynamic(
                 ) as r:
 
                     if r.status_code == 404:
-                        # This sequence simply doesn't exist.
+                        # This sequence does not exist.
                         break
 
                     r.raise_for_status()
@@ -422,13 +424,14 @@ def download_band_dynamic(
                     e
                 )
 
-                # Remove incomplete JP2.
+                # Remove incomplete temporary file.
                 try:
                     os.remove(tmp_filename)
                 except FileNotFoundError:
                     pass
 
                 if attempt < 4:
+
                     wait = 2 ** attempt
 
                     print(
@@ -452,12 +455,49 @@ def download_band_dynamic(
 
                 break
 
+    # --------------------------------------------------------
+    # Optional Copernicus fallback for SCL
+    # --------------------------------------------------------
+
+    if level == "L2A" and band_u.startswith("SCL"):
+
+        token = (
+            os.getenv("ACCESS_TOKEN")
+            or os.getenv("CDSE_ACCESS_TOKEN")
+        )
+
+        if token:
+
+            try:
+                ok = _download_scl_from_cdse(
+                    date,
+                    mgrs_tile,
+                    filename,
+                    token,
+                    scl_res="R20m"
+                )
+
+                if ok:
+                    return filename
+
+            except Exception as e:
+
+                print(
+                    f"CDSE fallback failed for SCL "
+                    f"{date}: {e}"
+                )
+
+    # --------------------------------------------------------
+    # Failure
+    # --------------------------------------------------------
+
     print(
         f"Failed to download {band_tag} on {date} "
         f"for tile {mgrs_tile} after retries."
     )
 
     return None
+
 
 # --- add imports if not already present ---
 
