@@ -2,6 +2,9 @@ from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm, Normalize
 import geopandas as gpd
 import pandas as pd
 import scipy
+import time
+import requests
+import os
 
 import openmeteo_requests
 import requests_cache
@@ -67,7 +70,105 @@ def get_pixel_from_latlon(bounds, lat, lon, shape):
     return row, col
 
 
-def generate_date_range(start: str, end: str, fmt: str = "%Y-%m-%d", dateStep : int = 5) -> list:
+def generate_date_range(
+    start: str,
+    end: str,
+    lat: float,
+    lon: float,
+    fmt: str = "%Y-%m-%d"
+) -> list:
+
+    from datetime import datetime, timedelta
+    import requests
+
+    mgrs_tile = latlon_to_s2_tile(lat, lon)
+
+    utm_zone = mgrs_tile[0:2]
+    lat_band = mgrs_tile[2]
+    grid_sq = mgrs_tile[3:5]
+
+    start_date = datetime.strptime(start, fmt)
+    end_date = datetime.strptime(end, fmt)
+
+    session = requests.Session()
+
+    def exists_on_date(dt):
+        y, m, d = dt.year, dt.month, dt.day
+
+        for seq in (0, 1):
+            url = (
+                "https://sentinel-s2-l1c.s3.amazonaws.com/tiles/"
+                f"{utm_zone}/{lat_band}/{grid_sq}/"
+                f"{y}/{m}/{d}/{seq}/B02.jp2"
+            )
+
+            try:
+                r = session.head(
+                    url,
+                    timeout=10,
+                    allow_redirects=True
+                )
+
+                if r.status_code == 200:
+                    return True
+
+            except requests.RequestException:
+                pass
+
+        return False
+
+    dates = []
+
+    #
+    # Step 1: search day-by-day until first acquisition.
+    #
+    current = start_date
+
+    while current <= end_date:
+
+        if exists_on_date(current):
+            dates.append(current.strftime(fmt))
+            print("First acquisition:", current.strftime(fmt))
+            break
+
+        current += timedelta(days=1)
+
+    if current > end_date:
+        return []
+
+    #
+    # Step 2: now follow the expected ~5-day cadence.
+    #
+    current += timedelta(days=5)
+
+    while current <= end_date:
+
+        found = False
+
+        # Allow for a little cadence drift.
+        for offset in (0, -1, 1, -2, 2):
+
+            candidate = current + timedelta(days=offset)
+
+            if candidate > end_date:
+                continue
+
+            if exists_on_date(candidate):
+
+                date_str = candidate.strftime(fmt)
+
+                if date_str not in dates:
+                    dates.append(date_str)
+
+                current = candidate
+                found = True
+                break
+
+        current += timedelta(days=5)
+
+    return sorted(dates)
+
+def generate_date_range_old(start: str, end: str, fmt: str = "%Y-%m-%d", dateStep : int = 5) -> list:
     """
     Generate a list of consecutive date strings from start to end (inclusive).
     
@@ -131,60 +232,12 @@ def make_path_name(cache_dir, mgrs_tile,date,band,extension):
     print("extension = >",extension,"<")
     return os.path.join(cache_dir, f"{mgrs_tile}_{date}_{band}.{extension}")
 
-"""
-def download_band_dynamic(date, band, lat, lon, cache_dir="s2_point_series"):
-    # Parse date
-    y, m, d = date.split("-")
-    y = int(y)
-    m = int(m)
-    d = int(d)
-
-    # Convert to MGRS tile
-    # new way, using Sentinel 2 tiling grid shapefile:
-    mgrs_tile = latlon_to_s2_tile(lat, lon)   # e.g. "14QQG"
-    print(f"[Line {inspect.currentframe().f_lineno}] ... lat       = ",lat      )
-    print(f"[Line {inspect.currentframe().f_lineno}] ... lon       = ",lon      )
-    print(f"[Line {inspect.currentframe().f_lineno}] ... mgrs_tile = ",mgrs_tile)
-
-    utm_zone = mgrs_tile[0:2]       # '14'
-    latitude_band = mgrs_tile[2]    # 'Q'
-    grid_square = mgrs_tile[3:5]    # 'KH'
-
-    # Construct RODA URL
-    base_url = (
-    #https://sentinel-s2-l1c.s3.amazonaws.com/tiles
-    #/14/Q/QG/2025/7/28/0/B11.jp2
-        f"https://sentinel-s2-l1c.s3.amazonaws.com/tiles/"     
-        f"{utm_zone}/{latitude_band}/{grid_square}/{y}/{m}/{d}/0/{band}.jp2"
-        #f"https://roda.sentinel-hub.com/sentinel-s2-l1c/tiles/"
-        #f"{utm_zone}/{latitude_band}/{grid_square}/{y}/{m}/{d}/0/{band}.jp2"
-    )
-    print("base_url = ", base_url)
-
-    filename = make_path_name(cache_dir, mgrs_tile,date,band,"jp2"   ) # os.path.join(cache_dir, f"{mgrs_tile}_{date}_{band}.jp2")
-
-    # Download if not cached
-    if not os.path.exists(filename):
-        print(f"[Line {inspect.currentframe().f_lineno}] ... Downloading, because did not find a cached file: ",filename)
-        r = requests.get(base_url, stream=True)
-        if r.status_code == 200:
-            with open(filename, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        else:  
-            print(f"[Line {inspect.currentframe().f_lineno}] ...  ")
-            print(f"Failed to download {band} on {date} from {mgrs_tile} (HTTP {r.status_code})")
-            return None
-    else:
-        print(f"[Line {inspect.currentframe().f_lineno}] ... Using cached file: ",filename)
-    return filename if os.path.exists(filename) else None
-"""
 
 
 # You already have this:
 # from your_utils import latlon_to_s2_tile
 
-def download_band_dynamic(date: str, band: str, lat: float, lon: float,
+def download_band_dynamic_old(date: str, band: str, lat: float, lon: float,
                           cache_dir: str = "s2_point_series",
                           level: Optional[str] = None) -> Optional[str]:
     """
@@ -301,6 +354,109 @@ def download_band_dynamic(date: str, band: str, lat: float, lon: float,
     print(f"[Line {inspect.currentframe().f_lineno}] ...       ")
     print(f"Failed to download {band_tag} on {date} for tile {mgrs_tile}. "
           f"Tried: {urls_to_try[0]} (and sequence fallback).")
+    return None
+
+
+
+
+def download_band_dynamic(
+    date: str,
+    band: str,
+    lat: float,
+    lon: float,
+    cache_dir: str = "s2_point_series",
+    level=None
+):
+
+    # ... KEEP YOUR EXISTING CODE ABOVE HERE ...
+    # everything that calculates mgrs_tile, urls_to_try,
+    # band_tag, filename, etc.
+
+    if os.path.exists(filename):
+        return filename
+
+    tmp_filename = filename + ".part"
+
+    for url in urls_to_try:
+
+        print(" trying url :", url)
+
+        for attempt in range(5):
+
+            try:
+
+                with requests.get(
+                    url,
+                    stream=True,
+                    timeout=(15, 120)
+                ) as r:
+
+                    if r.status_code == 404:
+                        # This sequence simply doesn't exist.
+                        break
+
+                    r.raise_for_status()
+
+                    with open(tmp_filename, "wb") as f:
+
+                        for chunk in r.iter_content(
+                            chunk_size=1024 * 1024
+                        ):
+                            if chunk:
+                                f.write(chunk)
+
+                # Download completed successfully.
+                os.replace(tmp_filename, filename)
+
+                return filename
+
+            except (
+                requests.ConnectionError,
+                requests.Timeout,
+                requests.ChunkedEncodingError
+            ) as e:
+
+                print(
+                    f"Download interrupted: {band_tag} {date}, "
+                    f"attempt {attempt + 1}/5:",
+                    e
+                )
+
+                # Remove incomplete JP2.
+                try:
+                    os.remove(tmp_filename)
+                except FileNotFoundError:
+                    pass
+
+                if attempt < 4:
+                    wait = 2 ** attempt
+
+                    print(
+                        f"Retrying in {wait} seconds..."
+                    )
+
+                    time.sleep(wait)
+
+            except requests.RequestException as e:
+
+                print(
+                    f"HTTP error downloading {band_tag} "
+                    f"on {date}:",
+                    e
+                )
+
+                try:
+                    os.remove(tmp_filename)
+                except FileNotFoundError:
+                    pass
+
+                break
+
+    print(
+        f"Failed to download {band_tag} on {date} "
+        f"for tile {mgrs_tile} after retries."
+    )
+
     return None
 
 # --- add imports if not already present ---
@@ -1425,7 +1581,58 @@ def crop_and_sum_intensity(band_path, aoi_gdf, scale_factor=None, clip_to_aoi_bo
         }
 
 
-def get_stats_from_gdf (my_gdf_box, input_tif, my_name, date, my_cloudy):
+def get_stats_from_gdf(
+    my_gdf_box,
+    input_tif,
+    my_name,
+    date,
+    my_cloudy
+):
+
+    empty_stats = {
+        "count_valid": 0,
+        "mean": float("nan"),
+        "median": float("nan"),
+    }
+
+    if not os.path.exists(input_tif):
+        print(
+            f"Could not find file {input_tif}. "
+            f"Returning NaN stats."
+        )
+        return empty_stats
+
+    print(f"Found file {input_tif}, continuing process...")
+
+    if my_cloudy:
+        print(
+            f"{date} / {my_name}: Too cloudy. "
+            f"Returning NaN."
+        )
+        return empty_stats
+
+    my_tif = make_path_name(
+        "s2_parcel_tifs",
+        latlon_to_s2_tile(Constants.lat0, Constants.lon0),
+        date,
+        my_name,
+        "tif"
+    )
+
+    return_stats = crop_ndmi_to_gdf(
+        input_tif,
+        my_gdf_box,
+        my_tif
+    )
+
+    print(
+        f"{date} / {my_name}: "
+        f"mean = {return_stats.get('mean', np.nan)}"
+    )
+
+    return return_stats
+
+def get_stats_from_gdf_old (my_gdf_box, input_tif, my_name, date, my_cloudy):
     empty_stats = {
         "count_valid": 0,
         "mean": float("nan"),

@@ -24,8 +24,9 @@ crs_override = "EPSG:4326"
 #reference:
 #Alonso-Dı´az MA, Castillo-Gallegos E, Basurto-Camberos H,Jarillo-Rodrı´guez J, Valles-de la Mora B (2007) Respuesta
 #productiva de una pastura de gramas nativas bajo pastoreo rotacional intensivo en clima ca´lido hu´medo. Avances en Investigacio´n Agropecuaria 11:35–55
-
+# Warm dry season should start march 1st:
 warmDryStart2025 = pd.to_datetime("2025-03-01")
+#warmDryStart2025 = pd.to_datetime("2025-01-01")
 warmDryEnd2025   = pd.to_datetime("2025-06-30") 
 # This will cause all stat significance to disappear:
 #warmDryStart2025 = pd.to_datetime("2025-01-01")
@@ -52,8 +53,8 @@ lon0 = -96.86942
 #lat0=26.0734
 #lon0= -97.2086
 # Borana University, Ethiopia. 1st October 2021 to the 30th of June 2022.
-lat0=4.908058823095451
-lon0= 38.15135412942004
+#lat0=4.908058823095451
+#lon0= 38.15135412942004
 
 # These were the lime tree locations:
 n_cols=21
