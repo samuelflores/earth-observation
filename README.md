@@ -1,9 +1,16 @@
 
+You will need to install a few libs. I do:
+conda install -c conda-forge jupyterlab
+conda create -n earth-observation -c conda-forge   python=3.12    jupyterlab   ipykernel   numpy   matplotlib   rasterio   geopandas  boto3 rasterstats matplotlib rasterio inspect importlib  pyproj shapely  libgdal-jp2openjpeg
+conda activate earth-observation  
+#conda install -c conda-forge numpy 
+python -m pip install retry-requests
+
 To reproduce the soil aggregate size histogram, use the r code and data in the soil-aggregate-sizes directory.
 
 For the historic precipitation and temperature plot using openmeteo, 
 In Constants.py, adjust lat0 and lon0 to your desired location
-You will first have to run create-NDMI-rgb-tile-geotiffs.ipynb, in order to get the cloud cover. See the instructions further down.          
+You can first have to create-NDMI-rgb-tile-geotiffs.ipynb, in order to get the cloud cover. See the instructions further down. Note that you do not have to do this, we also provide the NDMI and gNDVI data for 2022-2026 in .csv.           
 issue:
 python3 -m notebook openmeteo-weather.ipynb
 In openmeteo-weather.ipynb, adjust startDate, endDate. Run all cells.
