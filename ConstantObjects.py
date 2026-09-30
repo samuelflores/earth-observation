@@ -6,7 +6,8 @@ import geopandas as gpd
 import shapely
 from shapely.geometry import Polygon
 import Utils
-
+import math
+from pyproj import Transformer
 
 #print("n_cols in ConstantObjects:", Constants.n_cols)
 import inspect
@@ -27,6 +28,16 @@ print(f"[Line {inspect.currentframe().f_lineno}] n_cols in ConstantObjects: {Con
 
 print(f"[Line {inspect.currentframe().f_lineno}] gdf_tree_circles.shape: {gdf_tree_circles.shape}")
 
+gdf_box_woburn_abbey_park = Utils.draw_grid_box( # was gdf_box
+    51.991353,  # latitude 
+    -0.601723,  # longitude
+    Constants.dx,Constants.dy,
+    50, #Constants.n_cols,
+    70, #Constants.n_rows,
+    0, #rotation , was Constants.rotation_deg,
+    col1=0  , row1=0,
+    col2=90  , row2=-120,
+)
 
 gdf_box_plots_4_5 = Utils.draw_grid_box( # was gdf_box
     Constants.lat0, 
@@ -77,6 +88,64 @@ gdf_box_river        = Utils.draw_grid_box(
     col1=0, row1=0,
     col2=Constants.n_cols*12,row2=Constants.n_rows*12
 )
+
+gdf_box_willow = Utils.draw_grid_box(
+
+    (52.000593-.0017), # latitude
+    -0.618008, # longitude
+    Constants.dx,Constants.dy,
+    Constants.n_cols,Constants.n_rows,
+    Constants.rotation_deg,
+    col1=0,  row1=0,
+    col2=25, row2= 60                
+)
+
+gdf_box_woburn_soil_mine = Utils.draw_grid_box(
+    52.000593, #Constants.lat0, 
+    -0.614358, #Constants.lon0,
+    5,4, #Constants.dx,Constants.dy,
+    18,13, #Constants.n_cols,Constants.n_rows,
+    -117, # Constants.rotation_deg,
+    col1=0, row1=0,
+    col2=18-1, # 85m in this direction 
+    row2=13-1  # 48m in this direction
+)
+def gdf_box_woburn_soil_mine_20x20(myCol1, myRow1):
+    # UTM zone 30N uses ground metres at Woburn.
+    x0, y0 = Transformer.from_crs(
+        "EPSG:4326", "EPSG:32630", always_xy=True
+    ).transform(-0.614358, 52.000593)
+
+    theta = math.radians(-117)
+
+    def corner(col, row):
+        return (
+            x0 + 20 * (col * math.cos(theta) - row * math.sin(theta)),
+            y0 + 20 * (col * math.sin(theta) + row * math.cos(theta)),
+        )
+
+    polygon = Polygon([
+        corner(myCol1,     myRow1),
+        corner(myCol1 + 1, myRow1),
+        corner(myCol1 + 1, myRow1 + 1),
+        corner(myCol1,     myRow1 + 1),
+    ])
+
+    return gpd.GeoDataFrame(
+        geometry=[polygon], crs="EPSG:32630"
+    ).to_crs("EPSG:4326")
+
+def gdf_box_woburn_soil_mine_20x20_old(myCol1,myRow1): 
+    return Utils.draw_grid_box(
+        52.000593, #Constants.lat0, 
+        -0.614358, #Constants.lon0,
+        20,20,#Constants.dx,Constants.dy,
+        5 ,2 , #Constants.n_cols,Constants.n_rows,
+        -117, # Constants.rotation_deg,
+        col1=myCol1, row1=myRow1,
+        col2=myCol1+1,# 85m in this direction 
+        row2=myRow1+1# 48m in this direction
+    )
 
 gdf_box_terreno_casa = Utils.draw_grid_box(
     Constants.lat0, 

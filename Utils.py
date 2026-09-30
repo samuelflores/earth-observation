@@ -5,6 +5,7 @@ import scipy
 import time
 import requests
 import os
+import ipyleaflet
 
 import openmeteo_requests
 import requests_cache
@@ -46,6 +47,347 @@ import geopandas as gpd
 S2_GRID = gpd.read_file("sentinel2_tiling_grid_wgs84.geojson") 
 
 
+
+
+
+def area_weighted_raster_mean(tif, plot_gdf, return_pixels=False):
+    """
+    Compute an area-weighted mean raster value for one polygon.
+
+    Each raster pixel contributes in proportion to the area of that pixel
+    that overlaps the polygon.
+
+    Parameters
+    ----------
+    tif : str
+        Path to raster GeoTIFF.
+    plot_gdf : GeoDataFrame
+        GeoDataFrame containing one polygon.
+    return_pixels : bool
+        If True, also return a GeoDataFrame with per-pixel overlap info.
+
+    Returns
+    -------
+    weighted_mean
+    or
+    weighted_mean, pixels_gdf
+    """
+
+    with rio.open(tif) as src:
+
+        # Reproject polygon to the raster CRS
+        plot_raster = plot_gdf.to_crs(src.crs)
+        geom = plot_raster.geometry.iloc[0]
+
+        # Bounding box of polygon
+        minx, miny, maxx, maxy = geom.bounds
+
+        # Raster rows/cols covering polygon
+        row_min, col_min = src.index(minx, maxy)
+        row_max, col_max = src.index(maxx, miny)
+
+        records = []
+
+        for r in range(row_min, row_max + 1):
+            for c in range(col_min, col_max + 1):
+
+                left, top = src.xy(r, c, offset="ul")
+                right, bottom = src.xy(r, c, offset="lr")
+
+                pixel_geom = box(left, bottom, right, top)
+
+                overlap = pixel_geom.intersection(geom)
+
+                if overlap.is_empty:
+                    continue
+
+                overlap_area = overlap.area
+
+                if overlap_area <= 0:
+                    continue
+
+                value = src.read(
+                    1,
+                    window=((r, r + 1), (c, c + 1))
+                )[0, 0]
+
+                if src.nodata is not None and value == src.nodata:
+                    continue
+
+                if not np.isfinite(value):
+                    continue
+
+                pixel_area = pixel_geom.area
+                fraction_inside = overlap_area / pixel_area
+
+                records.append({
+                    "row": r,
+                    "col": c,
+                    "value": float(value),
+                    "overlap_area": overlap_area,
+                    "pixel_area": pixel_area,
+                    "fraction_inside": fraction_inside,
+                    "weighted_value": float(value) * overlap_area,
+                    "geometry": pixel_geom,
+                })
+
+    if len(records) == 0:
+        weighted_mean = np.nan
+        pixels = gpd.GeoDataFrame(
+            columns=[
+                "row", "col", "value",
+                "overlap_area", "pixel_area",
+                "fraction_inside", "weighted_value",
+                "geometry"
+            ],
+            crs=src.crs
+        )
+    else:
+        pixels = gpd.GeoDataFrame(records, crs=src.crs)
+
+        weighted_mean = (
+            pixels["weighted_value"].sum()
+            / pixels["overlap_area"].sum()
+        )
+
+    if return_pixels:
+        return weighted_mean, pixels
+
+    return weighted_mean
+
+
+def plot_pixels_with_values(
+    tif,
+    plot_gdf,
+    m,
+    layer_name="Raster pixels",
+    decimals=3,
+    padding_pixels=1,
+):
+
+    with rio.open(tif) as src:
+
+        print("Raster:", tif)
+        print("CRS:", src.crs)
+        print("Transform:", src.transform)
+        print("Pixel size:", src.res)
+
+        # Convert plot polygon to the raster CRS
+        plot_raster = plot_gdf.to_crs(src.crs)
+        geom = plot_raster.geometry.iloc[0]
+
+        minx, miny, maxx, maxy = geom.bounds
+
+        row_min, col_min = src.index(minx, maxy)
+        row_max, col_max = src.index(maxx, miny)
+
+        row_min -= padding_pixels
+        row_max += padding_pixels
+        col_min -= padding_pixels
+        col_max += padding_pixels
+
+        rows = []
+
+        for r in range(row_min, row_max + 1):
+            for c in range(col_min, col_max + 1):
+
+                left, top = src.xy(r, c, offset="ul")
+                right, bottom = src.xy(r, c, offset="lr")
+
+                pixel_geom = box(
+                    left,
+                    bottom,
+                    right,
+                    top
+                )
+
+                cx, cy = src.xy(r, c, offset="center")
+                center_point = Point(cx, cy)
+
+                intersects = pixel_geom.intersects(geom)
+                center_inside = geom.contains(center_point)
+
+                value = src.read(
+                    1,
+                    window=((r, r + 1), (c, c + 1))
+                )[0, 0]
+
+                if src.nodata is not None and value == src.nodata:
+                    value = np.nan
+
+                rows.append({
+                    "row": r,
+                    "col": c,
+                    "value": value,
+                    "intersects": intersects,
+                    "center_inside": center_inside,
+                    "geometry": pixel_geom,
+                })
+
+        pixels = gpd.GeoDataFrame(rows, crs=src.crs)
+
+    # Convert grid to geographic coordinates for Leafmap
+    pixels_ll = pixels.to_crs("EPSG:4326")
+
+    touched = pixels_ll[
+        pixels_ll["intersects"] &
+        ~pixels_ll["center_inside"]
+    ]
+
+    centers = pixels_ll[
+        pixels_ll["center_inside"]
+    ]
+
+    # Pixels that touch the polygon
+    if len(touched):
+        m.add_gdf(
+            touched,
+            layer_name=f"{layer_name}: touched",
+            style={
+                "color": "cyan",
+                "weight": 2,
+                "opacity": 1,
+                "fill": False,
+                "fillOpacity": 0,
+            },
+        )
+
+    # Pixels whose centers are inside the polygon
+    if len(centers):
+        m.add_gdf(
+            centers,
+            layer_name=f"{layer_name}: center inside",
+            style={
+                "color": "yellow",
+                "weight": 4,
+                "opacity": 1,
+                "fill": False,
+                "fillOpacity": 0,
+            },
+        )
+
+    #
+    # Visible numerical labels at pixel centers
+    #
+    for _, rec in pixels_ll.iterrows():
+
+        if not rec["intersects"]:
+            continue
+
+        value = rec["value"]
+
+        if np.isnan(value):
+            label = "NaN"
+        else:
+            label = f"{value:.{decimals}f}"
+
+        centroid = rec.geometry.centroid
+
+        icon = ipyleaflet.DivIcon(
+            html=f"""
+            <div style="
+                font-size:11px;
+                font-weight:bold;
+                color:black;
+                background:white;
+                border:1px solid black;
+                padding:1px 2px;
+                white-space:nowrap;
+            ">
+                {label}
+            </div>
+            """,
+            icon_size=(45, 18),
+            icon_anchor=(22, 9),
+        )
+
+        marker = ipyleaflet.Marker(
+            location=(centroid.y, centroid.x),
+            icon=icon,
+        )
+
+        m.add(marker)
+
+    return pixels
+
+
+def sentinel_pixel_grid(tif, lat, lon, radius_pixels=8):
+    """
+    Make vector polygons showing the actual raster pixels around lat/lon.
+    Pixel boundaries come directly from the GeoTIFF transform.
+    """
+
+    with rio.open(tif) as src:
+
+        print("Raster CRS:", src.crs)
+        print("Raster transform:", src.transform)
+        print("Pixel size:", src.res)
+
+        # Convert our lat/lon to raster CRS
+        transformer = Transformer.from_crs(
+            "EPSG:4326",
+            src.crs,
+            always_xy=True
+        )
+
+        x, y = transformer.transform(lon, lat)
+
+        # Which raster pixel contains lat/lon?
+        row, col = src.index(x, y)
+
+        print("Center raster pixel: row =", row, "col =", col)
+
+        polygons = []
+        rows = []
+        cols = []
+        for r in range(row-radius_pixels, row+radius_pixels+1):
+            for c in range(col-radius_pixels, col+radius_pixels+1):
+                # ACTUAL pixel corners according to raster transform
+                x_left,  y_top    = src.xy(r, c, offset="ul")
+                x_right, y_bottom = src.xy(r, c, offset="lr")
+
+                polygons.append(
+                    box(x_left, y_bottom, x_right, y_top)
+                )
+                rows.append(r)
+                cols.append(c)
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "row": rows,
+                "col": cols,
+                "geometry": polygons
+            },
+            crs=src.crs
+        )
+    return gdf.to_crs("EPSG:4326")
+
+
+def cleanup_rejected_scene(date, lat, lon, reason, enabled=False, project_dir="."):
+    """Remove files for one rejected tile/date from the three image folders."""
+    if not enabled:
+        return []
+
+    from pathlib import Path
+    from datetime import datetime
+
+    # Prevent an accidental wildcard or malformed date from matching other files.
+    if datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d") != date:
+        raise ValueError(f"Invalid date: {date}")
+
+    tile = latlon_to_s2_tile(lat, lon)
+    prefix = f"{tile}_{date}_"
+    removed = []
+
+    for folder in ("s2_point_series", "s2_derived_tifs", "s2_parcel_tifs"):
+        for path in (Path(project_dir) / folder).glob(prefix + "*"):
+            if path.is_file() and not path.is_symlink():
+                path.unlink()
+                removed.append(str(path))
+
+    print(f"Rejected {tile} {date}: {reason}")
+    print(f"Removed {len(removed)} files:", *removed, sep="\n  ")
+    return removed
 
 def show_raster_bounds(path):
     with rio.open(path) as ds:
@@ -117,56 +459,17 @@ def generate_date_range(
 
         return False
 
+    # Acquisition spacing is irregular, particularly with overlapping swaths.
+    # A cadence-based search can miss valid dates (e.g. 2026-06-04 at Woburn).
     dates = []
-
-    #
-    # Step 1: search day-by-day until first acquisition.
-    #
     current = start_date
-
     while current <= end_date:
-
         if exists_on_date(current):
             dates.append(current.strftime(fmt))
-            print("First acquisition:", current.strftime(fmt))
-            break
-
-        current += timedelta(days=1)
-
-    if current > end_date:
-        return []
-
-    #
-    # Step 2: now follow the expected ~5-day cadence.
-    #
-    current += timedelta(days=5)
-
-    while current <= end_date:
-
-        found = False
-
-        # Allow for a little cadence drift.
-        for offset in (0, -1, 1, -2, 2):
-
-            candidate = current + timedelta(days=offset)
-
-            if candidate > end_date:
-                continue
-
-            if exists_on_date(candidate):
-
-                date_str = candidate.strftime(fmt)
-
-                if date_str not in dates:
-                    dates.append(date_str)
-
-                current = candidate
-                found = True
-                break
-
-        current += timedelta(days=5)
-
-    return sorted(dates)
+        current += timedelta(days= Constants.S2_TIME_DELTA_DAYS )
+    if dates:
+        print("First acquisition:", dates[0])
+    return dates
 
 def generate_date_range_old(start: str, end: str, fmt: str = "%Y-%m-%d", dateStep : int = 5) -> list:
     """
@@ -415,7 +718,8 @@ def download_band_dynamic(
             except (
                 requests.ConnectionError,
                 requests.Timeout,
-                requests.ChunkedEncodingError
+                #requests.ChunkedEncodingError
+                requests.exceptions.ChunkedEncodingError
             ) as e:
 
                 print(
@@ -1162,6 +1466,23 @@ def _ndmi_stats_from_crop(band: np.ndarray, transform, nodata=-9999.0) -> dict:
     stats["area_km2_valid"] = stats["area_m2_valid"] / 1e6
     return stats
 
+def valid_index_pixels_in_gdf(index_path: str, aoi_gdf: gpd.GeoDataFrame) -> int:
+    """Count finite index pixels over an AOI without creating an output file."""
+    with rio.open(index_path) as src:
+        aoi = aoi_gdf.to_crs(src.crs)
+        try:
+            data, _ = mask(
+                src,
+                [geom.__geo_interface__ for geom in aoi.geometry],
+                crop=True,
+                filled=True,
+                nodata=np.nan,
+            )
+        except ValueError:  # AOI outside this raster
+            return 0
+    band = data[0]
+    return int(np.count_nonzero(np.isfinite(band) & (band >= -1) & (band <= 1)))
+
 def crop_ndmi_to_gdf(ndmi_path: str, gdf_box: gpd.GeoDataFrame, out_path: str) -> None:
     if not os.path.exists(ndmi_path):
         print(f"... The file {ndmi_path} does NOT exist. Skipping the rest of our function.")
@@ -1217,7 +1538,28 @@ def crop_ndmi_to_gdf(ndmi_path: str, gdf_box: gpd.GeoDataFrame, out_path: str) -
         print(f"NDMI mean: {stats['mean']:.4f}  (n={stats['count_valid']}, "
               f"p10={stats['p10']:.3f}, p90={stats['p90']:.3f}, "
               f"area_valid={stats['area_km2_valid']:.4f} km²)")
+        # Keep the old mean so we can compare during testing.
+        stats["mean_center"] = stats["mean"]
 
+        # Calculate geometrically area-weighted mean.
+        weighted_mean, weighted_pixels = area_weighted_raster_mean(
+            ndmi_path,
+            gdf_box,
+            return_pixels=True
+        )
+
+        stats["mean"] = weighted_mean
+        stats["weighted_mean"] = weighted_mean
+
+        # Useful diagnostics.
+        stats["n_intersecting"] = len(weighted_pixels)
+
+        if len(weighted_pixels):
+            stats["weighted_overlap_area_m2"] = float(
+                weighted_pixels["overlap_area"].sum()
+            )
+        else:
+            stats["weighted_overlap_area_m2"] = 0.0	
 
 
         # 4) Write a minimal, super-compatible GeoTIFF
@@ -1603,10 +1945,11 @@ def crop_and_sum_intensity(band_path, aoi_gdf, scale_factor=None, clip_to_aoi_bo
         data, out_transform = mask(src, geoms, crop=clip_to_aoi_bounds, nodata=src.nodata)
         arr = data[0].astype(np.float64)
 
-        if src.nodata is not None:
-            valid_mask = arr != src.nodata
-        else:
-            valid_mask = ~np.isnan(arr)
+        # Sentinel-2 DN=0 denotes missing coverage. These JP2s can have a
+        # full tile extent while containing only zero-valued pixels at the AOI.
+        valid_mask = np.isfinite(arr) & (arr > 0)
+        if src.nodata is not None and np.isfinite(src.nodata):
+            valid_mask &= arr != src.nodata
 
         arr_valid = arr[valid_mask]
         if scale_factor is not None:
@@ -1632,6 +1975,8 @@ def get_stats_from_gdf(
     empty_stats = {
         "count_valid": 0,
         "mean": float("nan"),
+        "mean_center": float("nan"),
+        "weighted_mean": float("nan"),
         "median": float("nan"),
     }
 
@@ -1667,6 +2012,8 @@ def get_stats_from_gdf(
 
     print(
         f"{date} / {my_name}: "
+        #f"mean_center = {return_stats.get('mean_center', np.nan)}"
+        #f"weighted_mean = {return_stats.get('weighted_mean', np.nan)}"
         f"mean = {return_stats.get('mean', np.nan)}"
     )
 
@@ -1773,4 +2120,3 @@ def compute_current_vs_past_seasons_single_plot_stat_significance(baseline_start
     print ("p value = ", p_values)
     print("****************************")
     return p_values
-

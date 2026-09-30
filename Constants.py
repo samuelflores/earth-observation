@@ -1,7 +1,8 @@
 import pandas as pd
 from rasterio.transform import from_bounds
 
-
+DELETE_REJECTED_DATE_FILES = False # Change to False to keep them. ATM the rejection happens not at download time, but during later processing.
+S2_TIME_DELTA_DAYS         = 5     # Sentinel-2 revisit frequency. At low latitudes, 5 days works pretty well. At high latitudes, you can get partial images at greater frequency.         
 
 # Point of interest (Veracruz)
 #lat, lon = 19.777411, -96.870102
@@ -44,8 +45,15 @@ dates = [
 
 
 # Tree grid parameters
+# Villanueva:
 lat0 = 19.7782 #location of tree at col 0 row 0. Note there is no actual tree at this location, it is on the driveway.
 lon0 = -96.86942
+#lat0 =  52.000593
+#lon0 = -0.614358
+#  Woburn Stackyard Soil Mine (RS/2) 
+woburn_lat0 =  52.000593
+woburn_lon0 = -0.614358
+
 #honolulu coordinates, for testing:
 #lat0=21.3099
 #lon0= -157.8581
@@ -57,8 +65,19 @@ lon0 = -96.86942
 #lon0= 38.15135412942004
 
 # These were the lime tree locations:
-n_cols=21
-n_rows=18
+# For veracruz
+#n_cols=21 
+#n_rows=18 
+
+# For Highfield
+n_cols=18 
+n_rows=13 
+
 dx=5
 dy=4
-rotation_deg=-155
+# For veracruz:
+rotation_deg=-155 
+
+# For highfield
+#rotation_deg=-117 
+
