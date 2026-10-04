@@ -48,8 +48,8 @@ dates = [
 # Villanueva:
 lat0 = 19.7782 #location of tree at col 0 row 0. Note there is no actual tree at this location, it is on the driveway.
 lon0 = -96.86942
-#lat0 =  52.000593
-#lon0 = -0.614358
+lat0 =  52.000593
+lon0 = -0.614358
 #  Woburn Stackyard Soil Mine (RS/2) 
 woburn_lat0 =  52.000593
 woburn_lon0 = -0.614358
@@ -66,12 +66,12 @@ woburn_lon0 = -0.614358
 
 # These were the lime tree locations:
 # For veracruz
-#n_cols=21 
-#n_rows=18 
+n_cols=21 
+n_rows=18 
 
 # For Highfield
-n_cols=18 
-n_rows=13 
+#n_cols=18 
+#n_rows=13 
 
 dx=5
 dy=4
@@ -80,4 +80,4 @@ rotation_deg=-155
 
 # For highfield
 #rotation_deg=-117 
-
+woburn_rotation_deg =-117  

@@ -6,3 +6,6 @@ jupyter lab create-NDMI-rgb-tile-geotiffs.ipynb
 Make sure your current directory includes soil-aggregate-image-analysis.csv
 
 I also include my R file, but the .ipynb is the one used for the publication.
+
+for the 2025 may june weather, use:
+visualcrossing-weather.ipynb

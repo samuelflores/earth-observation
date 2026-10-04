@@ -95,7 +95,7 @@ gdf_box_willow = Utils.draw_grid_box(
     -0.618008, # longitude
     Constants.dx,Constants.dy,
     Constants.n_cols,Constants.n_rows,
-    Constants.rotation_deg,
+    Constants.woburn_rotation_deg,
     col1=0,  row1=0,
     col2=25, row2= 60                
 )
